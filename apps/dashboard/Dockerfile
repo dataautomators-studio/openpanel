@@ -1,4 +1,4 @@
-ARG NODE_VERSION=20.15.1
+ARG NODE_VERSION=22.15.0
 
 FROM node:${NODE_VERSION}-slim AS base
 
@@ -44,6 +44,8 @@ COPY packages/constants/package.json packages/constants/package.json
 COPY packages/validation/package.json packages/validation/package.json
 COPY packages/integrations/package.json packages/integrations/package.json
 COPY packages/sdks/sdk/package.json packages/sdks/sdk/package.json
+# FIX: Add the missing payments package.json copy
+COPY packages/payments/package.json packages/payments/package.json
 
 # BUILD
 FROM base AS build
@@ -94,5 +96,3 @@ EXPOSE 3000
 
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
-
-ENTRYPOINT [ "/app/entrypoint.sh", "node", "/app/apps/dashboard/server.js"]
