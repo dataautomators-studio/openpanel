@@ -1,4 +1,8 @@
-$DOMAIN_NAME {
+{
+    auto_https disable_redirects
+}
+
+$DOMAIN_NAME:80 {
     $SSL_CONFIG
     encode gzip
 
@@ -14,7 +18,7 @@ $DOMAIN_NAME {
     reverse_proxy /* op-dashboard:3000
 }
 
-worker.$DOMAIN_NAME {
+worker.$DOMAIN_NAME:80 {
     $SSL_CONFIG
     encode gzip
 

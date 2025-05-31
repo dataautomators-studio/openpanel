@@ -8,13 +8,9 @@ services:
       dockerfile: caddy.Dockerfile
     container_name: caddy
     ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN_NAME: "example.localhost"
-      SSL_CONFIG: "" # Or your SSL config
-      BASIC_AUTH_USER: "admin"
-      BASIC_AUTH_PASSWORD: "" # Leave blank to auto-generate
+      - "30000:80"
+    env_file:
+      - .env
     volumes:
       - ./caddy.Caddyfile.template:/Caddyfile.template:ro
       - ./caddy.entrypoint.sh:/entrypoint.sh:ro
