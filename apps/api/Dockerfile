@@ -1,19 +1,13 @@
+# syntax=docker/dockerfile:1.7
+
 ARG NODE_VERSION=20.15.1
 
 FROM node:${NODE_VERSION}-slim AS base
 
-# FIX: Bad workaround (https://github.com/nodejs/corepack/issues/612)
+# Workaround for corepack integrity issue
 ENV COREPACK_INTEGRITY_KEYS=0
 
-RUN corepack enable && apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ca-certificates \
-    openssl \
-    libssl3 \
-    curl \
-    netcat-openbsd \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+RUN corepack enable
 
 ARG DATABASE_URL
 ENV DATABASE_URL=$DATABASE_URL
@@ -21,6 +15,15 @@ ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
 WORKDIR /app
+
+# Install all required system dependencies with apt cache (NO cleanup!)
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    openssl \
+    libssl3 \
+    curl \
+    netcat-openbsd
 
 # Workspace
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -41,31 +44,35 @@ COPY packages/sdks/sdk/package.json packages/sdks/sdk/
 COPY packages/constants/package.json packages/constants/
 COPY packages/validation/package.json packages/validation/
 COPY packages/integrations/package.json packages/integrations/
-COPY packages/sdks/sdk/package.json packages/sdks/sdk/
 
-# BUILD
+# ----------- BUILD STAGE -----------
 FROM base AS build
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install build dependencies (with apt cache, NO cleanup)
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++
 
 WORKDIR /app
-RUN pnpm install --frozen-lockfile && \
-    pnpm store prune
+
+# Install node dependencies with pnpm cache, NO prune
+RUN --mount=type=cache,target=/root/.pnpm-store \
+    pnpm install --frozen-lockfile --store-dir=/root/.pnpm-store
 
 COPY apps/api ./apps/api
 COPY packages ./packages
 COPY tooling ./tooling
 
-RUN pnpm db:codegen && \
-    pnpm --filter api run build
+RUN pnpm db:codegen && pnpm --filter api run build
 
-# PROD
+# ----------- PRODUCTION STAGE -----------
 FROM base AS prod
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install runtime dependencies (with apt cache, NO cleanup)
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++
@@ -73,10 +80,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --prod && \
-    pnpm store prune
 
-# FINAL
+# Install production node_modules with pnpm cache, NO prune
+RUN --mount=type=cache,target=/root/.pnpm-store \
+    pnpm install --frozen-lockfile --prod --store-dir=/root/.pnpm-store
+
+# ----------- FINAL STAGE -----------
 FROM base AS runner
 
 ENV NODE_ENV=production
@@ -104,6 +113,7 @@ COPY --from=build /app/packages/sdks/sdk ./packages/sdks/sdk
 COPY --from=build /app/packages/constants ./packages/constants
 COPY --from=build /app/packages/validation ./packages/validation
 COPY --from=build /app/packages/integrations ./packages/integrations
+
 RUN pnpm db:codegen
 
 WORKDIR /app/apps/api

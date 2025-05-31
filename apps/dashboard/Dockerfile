@@ -1,10 +1,11 @@
+# syntax=docker/dockerfile:1.7
+
 ARG NODE_VERSION=22.15.0
 
 FROM node:${NODE_VERSION}-slim AS base
 
-# FIX: Bad workaround (https://github.com/nodejs/corepack/issues/612)
+# Workaround for corepack integrity issue
 ENV COREPACK_INTEGRITY_KEYS=0
-
 ENV SKIP_ENV_VALIDATION="1"
 
 ARG DATABASE_URL
@@ -16,11 +17,11 @@ ENV ENABLE_INSTRUMENTATION_HOOK=$ENABLE_INSTRUMENTATION_HOOK
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
-# Install necessary dependencies for prisma
-RUN apt-get update && apt-get install -y \
+# Install necessary dependencies for prisma (with apt cache, no cleanup)
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y \
     openssl \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+    libssl3
 
 RUN corepack enable
 
@@ -44,14 +45,16 @@ COPY packages/constants/package.json packages/constants/package.json
 COPY packages/validation/package.json packages/validation/package.json
 COPY packages/integrations/package.json packages/integrations/package.json
 COPY packages/sdks/sdk/package.json packages/sdks/sdk/package.json
-# FIX: Add the missing payments package.json copy
 COPY packages/payments/package.json packages/payments/package.json
 
-# BUILD
+# ----------- BUILD STAGE -----------
 FROM base AS build
 
 WORKDIR /app
-RUN pnpm install --frozen-lockfile --ignore-scripts
+
+# Use pnpm cache, no prune!
+RUN --mount=type=cache,target=/root/.pnpm-store \
+    pnpm install --frozen-lockfile --ignore-scripts --store-dir=/root/.pnpm-store
 
 COPY apps/dashboard apps/dashboard
 COPY packages packages
@@ -66,7 +69,7 @@ ENV NEXT_PUBLIC_API_URL="__NEXT_PUBLIC_API_URL__"
 
 RUN pnpm run build
 
-# RUNNER
+# ----------- RUNNER STAGE -----------
 FROM base AS runner
 
 WORKDIR /app
@@ -96,3 +99,5 @@ EXPOSE 3000
 
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+
+ENTRYPOINT ["/app/entrypoint.sh" "node" "/app/apps/dashboard/server.js"]
