@@ -1,6 +1,8 @@
-ARG NODE_VERSION=20.15.1
+# syntax=docker/dockerfile:1.7
 
-FROM --platform=linux/amd64 node:${NODE_VERSION}-slim AS base
+ARG NODE_VERSION=22.15.0
+
+FROM node:${NODE_VERSION}-slim AS base
 
 ARG DATABASE_URL
 ENV DATABASE_URL=$DATABASE_URL
@@ -12,17 +14,19 @@ ARG CLICKHOUSE_URL
 ENV CLICKHOUSE_URL=$CLICKHOUSE_URL
 
 ENV PNPM_HOME="/pnpm"
-
 ENV PATH="$PNPM_HOME:$PATH"
 
 RUN corepack enable
 
-RUN apt update \
-  && apt install -y curl \
-  && curl -L https://raw.githubusercontent.com/tj/n/master/bin/n -o n \
-  && bash n $NODE_VERSION \
-  && rm n \
-  && npm install -g n
+# This is how you use --mount=type=cache correctly:
+RUN --mount=type=cache,target=/var/cache/apt \
+  apt update && \
+  apt install -y curl
+
+RUN curl -L https://raw.githubusercontent.com/tj/n/master/bin/n -o n && \
+  bash n $NODE_VERSION && \
+  rm n && \
+  npm install -g n
 
 WORKDIR /app
 
@@ -39,13 +43,15 @@ COPY packages/validation/package.json packages/validation/package.json
 COPY packages/sdks/sdk/package.json packages/sdks/sdk/package.json
 COPY packages/sdks/_info/package.json packages/sdks/_info/package.json
 
-# BUILD
+# ----------- BUILD STAGE -----------
 FROM base AS build
 
 WORKDIR /app/apps/public
-RUN pnpm install --frozen-lockfile --ignore-scripts
 
-WORKDIR  /app
+RUN --mount=type=cache,target=/root/.pnpm-store \
+  pnpm install --frozen-lockfile --ignore-scripts --store-dir=/root/.pnpm-store
+
+WORKDIR /app
 COPY apps/public apps/public
 COPY packages packages
 COPY tooling tooling
@@ -54,21 +60,25 @@ RUN pnpm db:codegen
 WORKDIR /app/apps/public
 RUN pnpm run build
 
-# PROD
+# ----------- PROD STAGE -----------
 FROM base AS prod
 
 WORKDIR /app/apps/public
-RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
-# FINAL
+RUN --mount=type=cache,target=/root/.pnpm-store \
+  pnpm install --frozen-lockfile --prod --ignore-scripts --store-dir=/root/.pnpm-store
+
+# ----------- FINAL STAGE -----------
 FROM base AS runner
 
 COPY --from=build /app/package.json /app/package.json
 COPY --from=prod /app/node_modules /app/node_modules
+
 # Apps
 COPY --from=build /app/apps/public /app/apps/public
 # Apps node_modules
 COPY --from=prod /app/apps/public/node_modules /app/apps/public/node_modules
+
 # Packages
 COPY --from=build /app/packages/db /app/packages/db
 COPY --from=build /app/packages/redis /app/packages/redis
@@ -78,6 +88,7 @@ COPY --from=build /app/packages/constants /app/packages/constants
 COPY --from=build /app/packages/validation /app/packages/validation
 COPY --from=build /app/packages/sdks/sdk /app/packages/sdks/sdk
 COPY --from=build /app/packages/sdks/_info /app/packages/sdks/_info
+
 # Packages node_modules
 COPY --from=prod /app/packages/db/node_modules /app/packages/db/node_modules
 COPY --from=prod /app/packages/redis/node_modules /app/packages/redis/node_modules

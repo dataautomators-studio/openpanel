@@ -1,0 +1,30 @@
+{
+    auto_https disable_redirects
+}
+
+$DOMAIN_NAME:80 {
+    $SSL_CONFIG
+    encode gzip
+
+    handle /op1.js {
+        root * /srv/static
+        file_server
+    }
+    
+    handle_path /api* {
+        reverse_proxy op-api:3000
+    }
+
+    reverse_proxy /* op-dashboard:3000
+}
+
+worker.$DOMAIN_NAME:80 {
+    $SSL_CONFIG
+    encode gzip
+
+    basic_auth {
+        admin $BASIC_AUTH_PASSWORD
+    }
+
+    reverse_proxy op-worker:3000
+}

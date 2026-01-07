@@ -1,0 +1,4 @@
+https://example.localhost:443, http://example.localhost:80 {
+  tls internal
+  reverse_proxy http://localhost:30000
+}
